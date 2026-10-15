@@ -50,7 +50,7 @@
 */
 
 // line disciplines - as defined in the drivers
-#define N_U50           28
+#define N_U50           29 ///28
 #define N_U61           27
 #define BRATE_U61       B921600
 #define BRATE_U50       B115200

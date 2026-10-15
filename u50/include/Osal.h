@@ -148,7 +148,17 @@ typedef struct OsalStatistics
  *                          Tasking Definitions
  *============================================================================*/
 typedef unsigned int OsalTaskId;
+// typedef unsigned int OsalThreadId;
+
+struct task_struct;
+
+#ifdef U50_KERNEL
+typedef struct task_struct *OsalThreadId;
+#else
+/* keep the existing non-kernel definition here */
 typedef unsigned int OsalThreadId;
+
+#endif
 
 #ifdef  __cplusplus
 extern "C"
@@ -234,7 +244,12 @@ int OsalGetPreviousTaskIndex(void);
 //
 // Pthreads inspired interface
 //
-typedef void *(*OsalEntryPoint) (void *);
+// typedef void *(*OsalEntryPoint) (void *);
+#ifdef U50_KERNEL
+typedef int (*OsalEntryPoint)(void *);
+#else
+typedef void *(*OsalEntryPoint)(void *);
+#endif
 OsalThreadId OsalCreateThread(OsalEntryPoint threadEntry, void* threadData);
 OsalThreadId OsalGetThreadId(void);
 

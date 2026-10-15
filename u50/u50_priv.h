@@ -27,6 +27,25 @@
 #include <linux/tty.h>
 #include "U50Link.h"
 
+struct U50LinkState;
+
+pLONVXD_Buffer getUplinkBufferFront(struct U50LinkState *state);
+void removeUplinkBufferFront(struct U50LinkState *state);
+void addToUplinkBuffer(
+		struct U50LinkState *state,
+		pLONVXD_Buffer data);
+size_t getUplinkBufferSize(struct U50LinkState *state);
+
+pLONVXD_Buffer getDownlinkBufferFront(struct U50LinkState *state);
+void removeDownlinkBufferFront(struct U50LinkState *state);
+void addToDownlinkBuffer(
+		struct U50LinkState *state,
+		pLONVXD_Buffer data);
+size_t getDownlinkBufferSize(struct U50LinkState *state);
+
+void *allocateMemory(size_t size);
+void freeMemory(void *buf);
+
 #define U50_PRIV_BUF_SIZE 150
 struct u50_priv {
 	struct U50LinkState state;

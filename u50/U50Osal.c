@@ -24,6 +24,8 @@
 #include <linux/tty.h>
 #include <linux/jiffies.h>
 #include <linux/kthread.h>
+#include <linux/err.h>
+#include <linux/printk.h>
 
 #include "platform.h"
 #include "U50Osal.h"
@@ -136,19 +138,66 @@ DWORD CalLowerRead(struct U50LinkState *state, PVOID pDest, WORD Count, PWORD pA
     return copyAmount ? ERROR_SUCCESS : ERROR_IO_PENDING;
 }
 
-void CalLowerWrite(struct U50LinkState *state, PVOID OutputBuffer, ULONG OutputBufferLength)
+// void CalLowerWrite(struct U50LinkState *state, PVOID OutputBuffer, ULONG OutputBufferLength)
+// {
+//     struct u50_priv *priv = get_priv(state);
+//     if (priv) {
+//         int actual = 0;
+//         spin_lock_bh(&priv->lock);
+//         memcpy(priv->xbuff, OutputBuffer, OutputBufferLength);
+//         if (priv->tty) {
+//             set_bit(TTY_DO_WRITE_WAKEUP, &priv->tty->flags);
+//             actual = priv->tty->ops->write(priv->tty, priv->xbuff, OutputBufferLength);
+//         }
+//         priv->xleft = OutputBufferLength - actual;
+//         priv->xhead = priv->xbuff + actual;
+//         spin_unlock_bh(&priv->lock);
+//     }
+// }
+
+void CalLowerWrite(struct U50LinkState *state,
+                   PVOID OutputBuffer,
+                   ULONG OutputBufferLength)
 {
     struct u50_priv *priv = get_priv(state);
+
     if (priv) {
         int actual = 0;
+
+        pr_info("u50: TX requested %lu bytes\n", OutputBufferLength);
+
+        print_hex_dump(KERN_INFO,
+                       "u50 TX: ",
+                       DUMP_PREFIX_NONE,
+                       16,
+                       1,
+                       OutputBuffer,
+                       OutputBufferLength,
+                       false);
+
         spin_lock_bh(&priv->lock);
+
         memcpy(priv->xbuff, OutputBuffer, OutputBufferLength);
+
         if (priv->tty) {
             set_bit(TTY_DO_WRITE_WAKEUP, &priv->tty->flags);
-            actual = priv->tty->ops->write(priv->tty, priv->xbuff, OutputBufferLength);
+
+            actual = priv->tty->ops->write(
+                priv->tty,
+                priv->xbuff,
+                OutputBufferLength);
         }
+
+        pr_info("u50: tty write returned %d\n", actual);
+
+        if (actual < 0) {
+            pr_err("u50: tty write failed: %d\n", actual);
+            actual = 0;
+        }
+
         priv->xleft = OutputBufferLength - actual;
         priv->xhead = priv->xbuff + actual;
+
         spin_unlock_bh(&priv->lock);
     }
 }
@@ -195,10 +244,28 @@ OsalTickCount OsalGetTickCount(void) {
     return jiffies_to_msecs(jiffies);
 }
 
-OsalThreadId OsalCreateThread(OsalEntryPoint threadEntry, void* threadData) {
+// OsalThreadId OsalCreateThread(OsalEntryPoint threadEntry, void* threadData) {
+//     struct task_struct *task;
+//     task = kthread_run((int (*)(void*))threadEntry, threadData, "U50Thread");
+//     return (OsalThreadId)task;
+// }
+
+OsalThreadId OsalCreateThread(
+        OsalEntryPoint threadEntry,
+        void *threadData)
+{
     struct task_struct *task;
-    task = kthread_run((int (*)(void*))threadEntry, threadData, "U50Thread");
-    return (OsalThreadId)task;
+
+    task = kthread_run(
+        (int (*)(void *))threadEntry,
+        threadData,
+        "U50Thread");
+
+    if (IS_ERR(task)) {
+        return NULL;
+    }
+
+    return task;
 }
 
 #ifdef U50_KERNEL

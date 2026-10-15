@@ -26,6 +26,7 @@
 #include "platform.h"
 #include "U50Driver.h"
 #include "U50Defs.h"
+#include <linux/time64.h>
 
 #define N_PIG_COUNT			5
 #define SMP_MSECS_KA		(1000*5)
@@ -65,7 +66,7 @@ struct U50LinkState {
 	WORD			m_AckTimeoutPhase;
 	//
 	OsalTickCount	m_tCountKeepalive;
-	time_t			m_tStartup;				// for reboot control.
+	time64_t m_tStartup;		// for reboot control.
 	OsalTickCount	m_tLogThrottle;
 	//
 	U50OpenMode		m_OpenMode;

@@ -36,6 +36,9 @@
     #define OSAL_EXTERNAL_FN
 #endif
 
+#include <linux/types.h>
+#include <linux/stddef.h>
+
 /*=============================================================================
  *                                  DEFINITIONS 
  *============================================================================*/
@@ -43,6 +46,8 @@
 #ifndef MAX_PATH
 #define MAX_PATH 260
 #endif
+
+struct U50LinkState;
 
 typedef int OsalProcessId;		// 0 is reserved - not a valid process ID
 
@@ -230,7 +235,16 @@ int OsalGetPreviousTaskIndex(void);
 //
 // Pthreads inspired interface
 //
-typedef void *(*OsalEntryPoint) (void *);
+// typedef void *(*OsalEntryPoint) (void *);
+#ifdef U50_KERNEL
+
+typedef int (*OsalEntryPoint)(void *);
+
+#else
+
+typedef void *(*OsalEntryPoint)(void *);
+
+#endif
 OsalThreadId OsalCreateThread(OsalEntryPoint threadEntry, void* threadData);
 OsalThreadId OsalGetThreadId(void);
 
@@ -422,6 +436,24 @@ OSAL_EXTERNAL_FN void OsalGetSystemPerformance(double *cpuUtil, unsigned long *r
 #define OsalGetCpuUtilization(x) OsalGetSystemPerformance(x,NULL,NULL)
 #define OsalGetRamUsage(x) OsalGetSystemPerformance(NULL,x,NULL)
 #define OsalGetRamTotal(x) OsalGetSystemPerformance(NULL,NULL,x)
+
+
+pLONVXD_Buffer getUplinkBufferFront(struct U50LinkState *state);
+void removeUplinkBufferFront(struct U50LinkState *state);
+void addToUplinkBuffer(
+		struct U50LinkState *state,
+		pLONVXD_Buffer data);
+size_t getUplinkBufferSize(struct U50LinkState *state);
+
+pLONVXD_Buffer getDownlinkBufferFront(struct U50LinkState *state);
+void removeDownlinkBufferFront(struct U50LinkState *state);
+void addToDownlinkBuffer(
+		struct U50LinkState *state,
+		pLONVXD_Buffer data);
+size_t getDownlinkBufferSize(struct U50LinkState *state);
+
+void *allocateMemory(size_t size);
+void freeMemory(void *buf);
 
 #ifdef __cplusplus
 }

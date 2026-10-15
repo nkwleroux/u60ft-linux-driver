@@ -33,6 +33,7 @@
 #include "Ldv32.h"
 #include "U50Link.h"
 #include "U50Osal.h"
+#include <linux/timekeeping.h>
 
 BOOL WaitThreadStart(struct U50LinkState *state);
 void smpReaderStateZap(struct U50LinkState *state);
@@ -212,7 +213,7 @@ void U50LinkShutdown(struct U50LinkState *state)
 short U50LinkStart(struct U50LinkState *state, PORT_HANDLE hComPort, DWORD baudrate, U50OpenMode mode)
 {
     int macRetries = 2;
-	struct timespec ts;
+	struct timespec64 ts;
 	state->m_hComPort = hComPort;
 	state->m_Options = (DCMP_BLIND|DCMP_DEFAULT);
 	state->m_OpenMode = mode;
@@ -239,7 +240,7 @@ short U50LinkStart(struct U50LinkState *state, PORT_HANDLE hComPort, DWORD baudr
 	state->m_UplinkReadPtr = NULL;
     state->m_bWaitForMAC = TRUE;
     state->m_bHaveMAC = FALSE;
-	getnstimeofday(&ts);
+	ktime_get_real_ts64(&ts);
 	state->m_tStartup = ts.tv_sec;
 
 	smpResetReader(state);
@@ -1342,8 +1343,8 @@ void smpWriteService(struct U50LinkState *state)
 					state->m_DevIndex, iTxState, state->m_LlpRxState);
 #endif
 			} else {		// just do this once.
-				struct timespec ts;
-				getnstimeofday(&ts);
+				struct timespec64 ts;
+				ktime_get_real_ts64(&ts);
 				if (state->m_bHaveMAC && (ts.tv_sec - state->m_tStartup) > 60) {
 					smpPanic(state);
 					state->m_tStartup = ts.tv_sec;		// Don't keep doing this too rapidly.
@@ -1501,8 +1502,10 @@ OsalTickCount TimerRemaining(Timer theTimer, WORD duration)
 //////////////////////////////////////////////////////////////////////
 // The reader thread:
 //////////////////////////////////////////////////////////////////////
-DWORD TheReaderThread(struct U50LinkState *state)
+static int TheReaderThread(void *data)
 {
+	struct U50LinkState *state = data;
+
 	DWORD RdStatus;
 	state->m_RTState = TSTATE_RUNNING;
 
@@ -1648,7 +1651,7 @@ BOOL WaitThreadStart(struct U50LinkState *state)		// returns TRUE if success
 	DWORD dwTaskTime;
 	OsalThreadId tid;
 	// Start thread, then wait...
-    tid = OsalCreateThread((OsalEntryPoint)TheReaderThread, state); 
+    tid = OsalCreateThread(TheReaderThread, state);
     state->m_hThisThread = tid;
 	if (!state->m_hThisThread) {
 		LDDebugError("[%d] Failed to create reader thread", state->m_DevIndex);
