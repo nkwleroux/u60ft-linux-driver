@@ -129,7 +129,8 @@ DWORD CalLowerRead(struct U50LinkState *state, PVOID pDest, WORD Count, PWORD pA
             memcpy(pDest, priv->rbuff, copyAmount);
             priv->rcount -= copyAmount;
             if (priv->rcount) {
-                memcpy(priv->rbuff, priv->rbuff+copyAmount, priv->rcount);
+                // memcpy(priv->rbuff, priv->rbuff+copyAmount, priv->rcount);
+                memmove(priv->rbuff, priv->rbuff + copyAmount, priv->rcount);
             }
         }
         *pActual = copyAmount;

@@ -564,7 +564,8 @@ static void u50_ldisc_receive_buf(
         size_t count)
 {
     struct u50_priv *priv = tty->disc_data;
-
+    size_t received = count;
+    
     pr_info("u50: receive_buf ENTER count=%zu room=%u\n",
             count,
             tty->receive_room);
@@ -585,19 +586,58 @@ static void u50_ldisc_receive_buf(
         return;
     }
 
-    if (!netif_running(priv->dev)) {
-        pr_info("u50: receive_buf: netdev not running\n");
-        return;
-    }
+    // if (!netif_running(priv->dev)) {
+    //     pr_info("u50: receive_buf: netdev not running\n");
+    //     return;
+    // }
+
+    // while (count--) {
+    //     if (priv->rcount < priv->buffsize)
+    //         priv->rbuff[priv->rcount++] = *cp++;
+    //     else
+    //         priv->dev->stats.rx_over_errors++;
+    // }
+
+    // OsalSetEvent(priv->state.m_hReadThreadNotifier);
+
+    spin_lock_bh(&priv->lock);
 
     while (count--) {
-        if (priv->rcount < priv->buffsize)
+        if (priv->rcount < priv->buffsize) {
             priv->rbuff[priv->rcount++] = *cp++;
-        else
+        } else {
             priv->dev->stats.rx_over_errors++;
+        }
     }
 
-    OsalSetEvent(priv->state.m_hReadThreadNotifier);
+    spin_unlock_bh(&priv->lock);
+
+    if (received)
+        OsalSetEvent(priv->state.m_hReadThreadNotifier);
+}
+
+static size_t u50_ldisc_receive_buf2(
+        struct tty_struct *tty,
+        const u8 *cp,
+        const u8 *fp,
+        size_t count)
+{
+    pr_info("u50: receive_buf2 ENTER count=%zu\n", count);
+
+    if (count) {
+        print_hex_dump(KERN_INFO,
+                       "u50 RX2 RAW: ",
+                       DUMP_PREFIX_NONE,
+                       16,
+                       1,
+                       cp,
+                       count,
+                       false);
+    }
+
+    u50_ldisc_receive_buf(tty, cp, fp, count);
+
+    return count;
 }
 
 static void u50_ldisc_write_wakeup(struct tty_struct* tty)
@@ -629,6 +669,7 @@ static struct tty_ldisc_ops u50_ldisc = {
     .hangup = u50_ldisc_hangup,
     .ioctl = u50_ldisc_ioctl,
     .receive_buf = u50_ldisc_receive_buf,
+    .receive_buf2 = u50_ldisc_receive_buf2,
     .write_wakeup = u50_ldisc_write_wakeup,
 };
 
