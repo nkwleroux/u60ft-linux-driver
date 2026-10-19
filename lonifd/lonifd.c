@@ -44,6 +44,7 @@
 #include <systemd/sd-daemon.h>
 #include <sys/file.h>
 #include <time.h>                   /* for time()  */
+#include <poll.h>
 
 /*
     See http://ftdi-usb-sio.sourceforge.net/#sec13
@@ -94,6 +95,100 @@ typedef enum {
 #define DEFAULT_PREFIX 44
 volatile uint8_t ipv6_domain_len_1_prefix = DEFAULT_PREFIX;
 
+static int u50_preflight_resync(int fd)
+{
+    static const uint8_t request[4] = {
+        0x7e, 0x07, 0x00, 0x7b
+    };
+
+    static const uint8_t cpnull[4] = {
+        0x7e, 0x00, 0x00, 0x82
+    };
+
+    uint8_t window[4] = {0};
+    size_t used = 0;
+    struct timespec start, now;
+
+    if (tcflush(fd, TCIOFLUSH) < 0)
+        return -1;
+
+    if (write(fd, request, sizeof(request)) !=
+        (ssize_t)sizeof(request)) {
+        errno = EIO;
+        return -1;
+    }
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start) < 0)
+        return -1;
+
+    for (;;) {
+        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+            return -1;
+
+        long elapsed =
+            (now.tv_sec - start.tv_sec) * 1000L +
+            (now.tv_nsec - start.tv_nsec) / 1000000L;
+
+        if (elapsed >= 2000)
+            break;
+
+        int wait_ms = (int)(2000 - elapsed);
+        if (wait_ms > 200)
+            wait_ms = 200;
+
+        struct pollfd pfd = {
+            .fd = fd,
+            .events = POLLIN
+        };
+
+        int ret = poll(&pfd, 1, wait_ms);
+
+        if (ret < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+
+        if (ret == 0)
+            continue;
+
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            errno = EIO;
+            return -1;
+        }
+
+        if (!(pfd.revents & POLLIN))
+            continue;
+
+        uint8_t buf[128];
+        ssize_t n = read(fd, buf, sizeof(buf));
+
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+
+        for (ssize_t i = 0; i < n; ++i) {
+            if (used < sizeof(window)) {
+                window[used++] = buf[i];
+            } else {
+                memmove(window, window + 1,
+                        sizeof(window) - 1);
+                window[sizeof(window) - 1] = buf[i];
+            }
+
+            if (used == sizeof(window) &&
+                memcmp(window, cpnull, sizeof(cpnull)) == 0) {
+                return 0;
+            }
+        }
+    }
+
+    errno = ETIMEDOUT;
+    return -1;
+}
+
 // This function create a LON network interface using the Line disciplines
 // return < 0 if failure
 static int setup_serial_interface(char* devstr, int ldisc) {
@@ -119,13 +214,43 @@ static int setup_serial_interface(char* devstr, int ldisc) {
         syslog(LOG_ERR, "Error opening device %s: %s\n", devstr, strerror(errno));
     } else {
         tcflush(fd, TCIFLUSH);
-        if(tcsetattr(fd, TCSANOW, &tio) < 0) {
+        // if(tcsetattr(fd, TCSANOW, &tio) < 0) {
+        //     perror("tcsetattr");
+        //     syslog(LOG_ERR, "Error setting device attributes (tcsetattr): %s\n", strerror(errno));
+        // }
+        // if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
+        //     perror("ioctl");
+        //     syslog(LOG_ERR, "Error setting device attributes (ioctl %d): %s\n", ldisc, strerror(errno));
+        // }
+        if (tcsetattr(fd, TCSANOW, &tio) < 0) {
             perror("tcsetattr");
-            syslog(LOG_ERR, "Error setting device attributes (tcsetattr): %s\n", strerror(errno));
+            close(fd);
+            return -1;
         }
+
+        /*
+        * Initialize the U60 before handing the serial
+        * connection to the kernel U50 line discipline.
+        */
+        if (ldisc == N_U50) {
+            if (u50_preflight_resync(fd) < 0) {
+                perror("U50 CpResync/CpNull failed");
+                close(fd);
+                return -1;
+            }
+
+            syslog(LOG_INFO,
+                "U50 preflight CpResync/CpNull succeeded");
+        }
+
+        /*
+        * Only attach the kernel driver after the
+        * serial preflight completed successfully.
+        */
         if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
-            perror("ioctl");
-            syslog(LOG_ERR, "Error setting device attributes (ioctl %d): %s\n", ldisc, strerror(errno));
+            perror("TIOCSETD");
+            close(fd);
+            return -1;
         }
     }
     if (ldisc == N_U61)

@@ -249,13 +249,6 @@ short U50LinkStart(struct U50LinkState *state, PORT_HANDLE hComPort, DWORD baudr
 	TMR_Stop(state->m_ReadStartTimer);
 	TMR_Stop(state->m_RejectTimer);
 	// // Send a Resync to get things back in sync (sequence numbers and the like)
-	// smpDlCpNow(state, CpNiResync, 0);
-
-	if (!WaitThreadStart(state)) {
-		return LDVX_INITIALIZATION_FAILED;
-	}
-
-	// Send a Resync to get things back in sync (sequence numbers and the like)
 	smpDlCpNow(state, CpNiResync, 0);
 
 	/*
@@ -264,6 +257,14 @@ short U50LinkStart(struct U50LinkState *state, PORT_HANDLE hComPort, DWORD baudr
  	* startup commands begin.
  	*/
 	msleep(100);
+
+
+	if (!WaitThreadStart(state)) {
+		return LDVX_INITIALIZATION_FAILED;
+	}
+
+	// Send a Resync to get things back in sync (sequence numbers and the like)
+	// smpDlCpNow(state, CpNiResync, 0);
 
     // Get perm MAC addr, do before launching TheReaderThread!
     LDDebugInform("Link Start, acquire embedded MAC");

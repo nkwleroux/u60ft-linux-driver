@@ -545,7 +545,7 @@ static void u50_ldisc_close(struct tty_struct* tty)
 // static int     u50_ldisc_ioctl(struct tty_struct *tty, struct file *file, unsigned int cmd, unsigned long arg) {
 static int u50_ldisc_ioctl(struct tty_struct* tty, unsigned int cmd, unsigned long arg)
 {
-    return 0;
+    return -ENOIOCTLCMD;
 }
 
 static void u50_ldisc_hangup(struct tty_struct* tty)
