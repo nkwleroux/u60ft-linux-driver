@@ -191,78 +191,131 @@ static int u50_preflight_resync(int fd)
 
 // This function create a LON network interface using the Line disciplines
 // return < 0 if failure
-static int setup_serial_interface(char* devstr, int ldisc) {
+static int setup_serial_interface(char *devstr, int ldisc)
+{
     int fd;
-    FILE *mod_sysfs_file;
     struct termios tio;
-    tcflag_t c_cflag;
-    bzero(&tio, sizeof(tio));
-    if (ldisc == N_U61)
-        c_cflag = BRATE_U61a;
-    else
-        c_cflag = BRATE_U50;
-    tio.c_cflag = c_cflag | CS8 | CLOCAL | CREAD;
-    tio.c_iflag = IGNPAR;
-    tio.c_oflag = 0;
-    tio.c_lflag = 0;
-    tio.c_cc[VMIN] = 0;
-    tio.c_cc[VTIME] = 1;
+    struct termios verified;
+    speed_t speed;
+    FILE *mod_sysfs_file;
 
     fd = open(devstr, O_RDWR | O_NOCTTY);
     if (fd < 0) {
         perror("open");
-        syslog(LOG_ERR, "Error opening device %s: %s\n", devstr, strerror(errno));
-    } else {
-        tcflush(fd, TCIFLUSH);
-        // if(tcsetattr(fd, TCSANOW, &tio) < 0) {
-        //     perror("tcsetattr");
-        //     syslog(LOG_ERR, "Error setting device attributes (tcsetattr): %s\n", strerror(errno));
-        // }
-        // if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
-        //     perror("ioctl");
-        //     syslog(LOG_ERR, "Error setting device attributes (ioctl %d): %s\n", ldisc, strerror(errno));
-        // }
-        if (tcsetattr(fd, TCSANOW, &tio) < 0) {
-            perror("tcsetattr");
-            close(fd);
-            return -1;
-        }
-
-        /*
-        * Initialize the U60 before handing the serial
-        * connection to the kernel U50 line discipline.
-        */
-        if (ldisc == N_U50) {
-            if (u50_preflight_resync(fd) < 0) {
-                perror("U50 CpResync/CpNull failed");
-                close(fd);
-                return -1;
-            }
-
-            syslog(LOG_INFO,
-                "U50 preflight CpResync/CpNull succeeded");
-        }
-
-        /*
-        * Only attach the kernel driver after the
-        * serial preflight completed successfully.
-        */
-        if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
-            perror("TIOCSETD");
-            close(fd);
-            return -1;
-        }
+        syslog(LOG_ERR, "Failed to open %s: %s",
+               devstr, strerror(errno));
+        return -1;
     }
+
+    if (tcgetattr(fd, &tio) < 0) {
+        perror("tcgetattr");
+        goto error;
+    }
+
+    /* Configure raw serial communication. */
+    cfmakeraw(&tio);
+
+    tio.c_iflag = IGNPAR;
+    tio.c_oflag = 0;
+    tio.c_lflag = 0;
+
+    /* 8 data bits, no parity, one stop bit. */
+    tio.c_cflag &= ~(CSIZE | PARENB | PARODD |
+                      CSTOPB | HUPCL);
+
+#ifdef CRTSCTS
+    tio.c_cflag &= ~CRTSCTS;
+#endif
+
+    tio.c_cflag |= CS8 | CLOCAL | CREAD;
+
+    tio.c_cc[VMIN] = 0;
+    tio.c_cc[VTIME] = 1;
+
+    speed = (ldisc == N_U61)
+                ? BRATE_U61a
+                : BRATE_U50;
+
+    /* Set BOTH speeds explicitly. */
+    if (cfsetispeed(&tio, speed) < 0 ||
+        cfsetospeed(&tio, speed) < 0) {
+        perror("cfsetispeed/cfsetospeed");
+        goto error;
+    }
+
+    if (tcsetattr(fd, TCSANOW, &tio) < 0) {
+        perror("tcsetattr");
+        goto error;
+    }
+
+    /* Verify the settings actually applied. */
+    if (tcgetattr(fd, &verified) < 0) {
+        perror("tcgetattr verification");
+        goto error;
+    }
+
+    if (cfgetispeed(&verified) != speed ||
+        cfgetospeed(&verified) != speed ||
+        (verified.c_cflag & PARENB) ||
+        (verified.c_cflag & CSTOPB) ||
+        ((verified.c_cflag & CSIZE) != CS8)) {
+
+        fprintf(stderr,
+                "Serial settings verification failed: "
+                "ispeed=%lu ospeed=%lu c_cflag=0x%lx\n",
+                (unsigned long)cfgetispeed(&verified),
+                (unsigned long)cfgetospeed(&verified),
+                (unsigned long)verified.c_cflag);
+
+        errno = EINVAL;
+        goto error;
+    }
+
+    fprintf(stderr,
+            "Serial configuration verified for %s\n",
+            devstr);
+
+    if (tcflush(fd, TCIOFLUSH) < 0) {
+        perror("tcflush");
+        goto error;
+    }
+
+    if (ldisc == N_U50) {
+        if (u50_preflight_resync(fd) < 0) {
+            perror("U50 CpResync/CpNull failed");
+            goto error;
+        }
+
+        fprintf(stderr,
+                "U50 preflight CpResync/CpNull succeeded\n");
+
+        syslog(LOG_INFO,
+            "U50 preflight CpResync/CpNull succeeded");
+    }
+
+    if (ioctl(fd, TIOCSETD, &ldisc) < 0) {
+        perror("TIOCSETD");
+        goto error;
+    }
+
     if (ldisc == N_U61)
-        mod_sysfs_file = fopen(U61_LTIP_OBD_DRIVER_FILE, "w+");
+        mod_sysfs_file =
+            fopen(U61_LTIP_OBD_DRIVER_FILE, "w+");
     else
-        mod_sysfs_file = fopen(U50_LTIP_OBD_DRIVER_FILE, "w+");
+        mod_sysfs_file =
+            fopen(U50_LTIP_OBD_DRIVER_FILE, "w+");
+
     if (mod_sysfs_file) {
-        fseek(mod_sysfs_file, 0, SEEK_SET);
-        fprintf(mod_sysfs_file, "%d", ipv6_domain_len_1_prefix);
+        fprintf(mod_sysfs_file, "%d",
+                ipv6_domain_len_1_prefix);
         fclose(mod_sysfs_file);
     }
+
     return fd;
+
+error:
+    close(fd);
+    return -1;
 }
 
 static int read_domain_len_1_prefix()

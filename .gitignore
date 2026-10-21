@@ -96,3 +96,7 @@ coverage/
 *.profraw
 *.profdata
 *.prof
+
+
+#Build lonifd
+lonifd/lonifd
