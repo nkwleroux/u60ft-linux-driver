@@ -26,6 +26,8 @@
 #include <linux/ip.h>
 #include <linux/etherdevice.h>
 #include <linux/netdevice.h>
+#include <linux/device.h>
+#include <linux/compiler.h>
 #include <linux/skbuff.h>
 #include <linux/rtnetlink.h>
 #include <linux/tty.h>
@@ -423,10 +425,67 @@ static const struct net_device_ops u50_netdev_ops = {
     .ndo_set_mac_address = U50SetHWAddr,
 };
 
+// Read-only, per-interface MIP status acquired from the U60FT via nicbSSTATUS.
+// U50LinkStart() clears m_Llpstat and queues the status request during startup.
+// A zero MipVersion means the status response has not yet been received.
+// The version is the MIP protocol version, not the u50.ko module version.
+static ssize_t mip_version_show(struct device *device,
+                                struct device_attribute *attr,
+                                char *buf)
+{
+    struct net_device *dev = to_net_dev(device);
+    struct u50_priv *priv = netdev_priv(dev);
+    unsigned int version;
+
+    if (!netif_running(dev))
+        return sysfs_emit(buf, "unknown\n");
+
+    version = READ_ONCE(priv->state.m_Llpstat.MipVersion);
+    if (version == 0)
+        return sysfs_emit(buf, "unknown\n");
+
+    return sysfs_emit(buf, "0x%02X\n", version);
+}
+
+static DEVICE_ATTR_RO(mip_version);
+
+static ssize_t mip_mode_show(struct device *device,
+                             struct device_attribute *attr,
+                             char *buf)
+{
+    struct net_device *dev = to_net_dev(device);
+    struct u50_priv *priv = netdev_priv(dev);
+    unsigned int version;
+    unsigned int mode;
+
+    if (!netif_running(dev))
+        return sysfs_emit(buf, "unknown\n");
+
+    version = READ_ONCE(priv->state.m_Llpstat.MipVersion);
+    if (version == 0)
+        return sysfs_emit(buf, "unknown\n");
+
+    mode = READ_ONCE(priv->state.m_Llpstat.MipMode);
+    return sysfs_emit(buf, "%u\n", mode);
+}
+
+static DEVICE_ATTR_RO(mip_mode);
+
+static struct attribute *u50_mip_attrs[] = {
+    &dev_attr_mip_version.attr,
+    &dev_attr_mip_mode.attr,
+    NULL,
+};
+
+static const struct attribute_group u50_mip_group = {
+    .attrs = u50_mip_attrs,
+};
+
 static void u50_setup(struct net_device* dev)
 {
     //	dev->header_ops = &ldv_header_ops;
     dev->netdev_ops = &u50_netdev_ops;
+    dev->sysfs_groups[0] = &u50_mip_group;
     dev->priv_destructor = u50_free_netdev;
 
     dev->type = U50_DEV_TYPE;
